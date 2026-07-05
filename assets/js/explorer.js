@@ -40,6 +40,17 @@
     const simulationCard = document.getElementById('simulationCard');
     const svg = document.getElementById('jvmSvg');
 
+    const guidePanel = document.getElementById('guidePanel');
+    const guideToggle = document.getElementById('btnToggleGuide');
+    guideToggle?.addEventListener('click', () => {
+        const collapsed = guidePanel.classList.toggle('is-collapsed');
+        guideToggle.setAttribute('aria-expanded', String(!collapsed));
+        guideToggle.setAttribute('aria-label', collapsed ? '가이드 펼치기' : '가이드 접기');
+        const icon = guideToggle.querySelector('i');
+        icon.classList.toggle('fa-chevron-up', !collapsed);
+        icon.classList.toggle('fa-chevron-down', collapsed);
+    });
+
     function applyTransform() {
         state.transformFrame = 0;
         content.style.transform = `translate3d(${state.panX}px, ${state.panY}px, 0) scale(${state.scale})`;

@@ -44,10 +44,16 @@
     <div class="flex-1 flex overflow-hidden relative">
         
         <!-- Left Help Panel -->
-        <div class="absolute top-4 left-4 z-10 bg-[#1c1e24]/90 backdrop-blur border border-[#2d3139] rounded-xl p-4 w-72 pointer-events-auto shadow-xl">
-            <h3 class="font-bold text-sm text-[#e5c07b] mb-2 flex items-center gap-1.5">
-                <i class="fa-solid fa-circle-info text-[#61afef]"></i> 조작 및 학습 가이드
-            </h3>
+        <div id="guidePanel" class="absolute top-4 left-4 z-10 bg-[#1c1e24]/90 backdrop-blur border border-[#2d3139] rounded-xl p-4 w-72 pointer-events-auto shadow-xl">
+            <div class="flex items-center justify-between gap-3">
+                <h3 class="font-bold text-sm text-[#e5c07b] flex items-center gap-1.5 whitespace-nowrap">
+                    <i class="fa-solid fa-circle-info text-[#61afef]"></i> 조작 및 학습 가이드
+                </h3>
+                <button id="btnToggleGuide" type="button" aria-expanded="true" aria-controls="guidePanelContent" aria-label="가이드 접기" class="w-7 h-7 shrink-0 bg-[#21252b] rounded flex items-center justify-center text-xs hover:bg-[#2c313c] text-[#abb2bf] border border-[#3e4451]">
+                    <i class="fa-solid fa-chevron-up"></i>
+                </button>
+            </div>
+            <div id="guidePanelContent" class="mt-2">
             <ul class="text-xs text-[#828997] space-y-2 leading-relaxed">
                 <li class="flex items-start gap-1.5">
                     <span class="text-[#61afef]">•</span>
@@ -68,6 +74,7 @@
                     <button id="btnZoomIn" class="w-6 h-6 bg-[#21252b] rounded flex items-center justify-center text-xs hover:bg-[#2c313c] text-[#abb2bf] border border-[#3e4451]"><i class="fa-solid fa-plus"></i></button>
                     <button id="btnZoomOut" class="w-6 h-6 bg-[#21252b] rounded flex items-center justify-center text-xs hover:bg-[#2c313c] text-[#abb2bf] border border-[#3e4451]"><i class="fa-solid fa-minus"></i></button>
                 </div>
+            </div>
             </div>
         </div>
 
