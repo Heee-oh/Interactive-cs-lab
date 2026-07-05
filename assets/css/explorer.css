@@ -1,0 +1,184 @@
+:root {
+    --bg: #202628;
+    --surface-1: #272e31;
+    --surface-2: #2d3539;
+    --surface-3: #343d41;
+    --border: #49545a;
+    --border-strong: #5d696f;
+    --text: #d8d5cc;
+    --muted: #a6adaa;
+    --subtle: #8f9897;
+    --blue: #8fb3b8;
+    --green: #a7b88d;
+    --yellow: #d0b47c;
+    --purple: #ad9fb5;
+    --orange: #c49c79;
+    --cyan: #87aaa8;
+    --red: #c58e8a;
+    --deep-red: #b9827b;
+}
+
+body {
+    overflow: hidden;
+    color: var(--text);
+    background: var(--bg);
+    font-family: Inter, "Nanum Gothic", sans-serif;
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--surface-1); }
+::-webkit-scrollbar-thumb { border-radius: 3px; background: var(--border); }
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+.canvas-container {
+    position: relative;
+    width: 100%;
+    height: calc(100vh - 64px);
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+
+.canvas-container.is-dragging { cursor: grabbing; }
+
+.zoom-target {
+    transform-origin: 0 0;
+    will-change: transform;
+    transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Direct manipulation must track the pointer exactly; interpolation causes jitter. */
+.zoom-target.is-direct-manipulation { transition: none; }
+
+.focus-ring { transition: stroke 180ms ease, stroke-width 180ms ease; }
+
+@keyframes pulse-flow {
+    from { stroke-dashoffset: 80; }
+    to { stroke-dashoffset: 0; }
+}
+
+.flow-path {
+    opacity: 0.6;
+    stroke-dasharray: 6 6;
+    animation: pulse-flow 5s linear infinite;
+}
+
+.flow-path-fast {
+    opacity: 0.8;
+    stroke-dasharray: 4 4;
+    animation: pulse-flow 2s linear infinite;
+}
+
+[class~="bg-[#14161b]"], [class~="bg-[#14161b]/60"] { background-color: var(--bg) !important; }
+[class~="bg-[#1c1e24]"], [class~="bg-[#1c1e24]/90"], [class~="bg-[#1e222b]"] { background-color: var(--surface-1) !important; }
+[class~="bg-[#21252b]"], [class~="bg-[#242d28]"], [class~="bg-[#2d2529]"] { background-color: var(--surface-2) !important; }
+[class~="bg-[#2d3139]"], [class~="bg-[#2e3440]"] { background-color: var(--surface-3) !important; }
+[class~="hover:bg-[#2c313c]"]:hover, [class~="hover:bg-[#3e4451]"]:hover, [class~="hover:bg-[#4b5263]"]:hover { background-color: #414b50 !important; }
+
+[class~="text-[#abb2bf]"] { color: var(--text) !important; }
+[class~="text-[#828997]"], [class~="text-[#5c6370]"] { color: var(--muted) !important; }
+[class~="text-[#61afef]"] { color: var(--blue) !important; }
+[class~="text-[#98c379]"] { color: var(--green) !important; }
+[class~="text-[#e5c07b]"] { color: var(--yellow) !important; }
+[class~="text-[#c678dd]"] { color: var(--purple) !important; }
+[class~="text-[#d19a66]"] { color: var(--orange) !important; }
+[class~="text-[#56b6c2]"] { color: var(--cyan) !important; }
+[class~="text-[#e06c75]"], [class~="text-[#be5046]"] { color: var(--red) !important; }
+
+[class~="border-[#2d3139]"], [class~="border-[#3e4451]"] { border-color: var(--border) !important; }
+[class~="border-[#4b5263]"], [class~="border-[#4c566a]"] { border-color: var(--border-strong) !important; }
+
+#jvmSvg [fill="#14161b"], #jvmSvg [fill="#181a1f"] { fill: var(--bg); }
+#jvmSvg [fill="#1c1e24"], #jvmSvg [fill="#1e222b"], #jvmSvg [fill="#1b221f"],
+#jvmSvg [fill="#1e2d2d"], #jvmSvg [fill="#2d2529"] { fill: var(--surface-1); }
+#jvmSvg [fill="#21252b"], #jvmSvg [fill="#242d28"], #jvmSvg [fill="#2d3139"],
+#jvmSvg [fill="#2c313c"] { fill: var(--surface-2); }
+#jvmSvg [fill="#abb2bf"] { fill: var(--text); }
+#jvmSvg [fill="#828997"], #jvmSvg [fill="#5c6370"] { fill: var(--muted); }
+#jvmSvg [fill="#61afef"] { fill: var(--blue); }
+#jvmSvg [fill="#98c379"] { fill: var(--green); }
+#jvmSvg [fill="#e5c07b"] { fill: var(--yellow); }
+#jvmSvg [fill="#c678dd"] { fill: var(--purple); }
+#jvmSvg [fill="#d19a66"] { fill: var(--orange); }
+#jvmSvg [fill="#56b6c2"] { fill: var(--cyan); }
+#jvmSvg [fill="#e06c75"] { fill: var(--red); }
+#jvmSvg [fill="#be5046"] { fill: var(--deep-red); }
+#jvmSvg [stroke="#2d3139"], #jvmSvg [stroke="#3e4451"], #jvmSvg [stroke="#5c6370"] { stroke: var(--border); }
+#jvmSvg [stroke="#61afef"] { stroke: var(--blue); }
+#jvmSvg [stroke="#98c379"] { stroke: var(--green); }
+#jvmSvg [stroke="#c678dd"] { stroke: var(--purple); }
+#jvmSvg [stroke="#d19a66"] { stroke: var(--orange); }
+#jvmSvg [stroke="#56b6c2"] { stroke: var(--cyan); }
+#jvmSvg [stroke="#e06c75"] { stroke: var(--red); }
+#jvmSvg [stroke="#be5046"] { stroke: var(--deep-red); }
+#jvmSvg [stop-color="#282c34"], #jvmSvg [stop-color="#2b303c"], #jvmSvg [stop-color="#2e2d2a"] { stop-color: var(--surface-3); }
+#jvmSvg [stop-color="#1e222b"], #jvmSvg [stop-color="#21252b"], #jvmSvg [stop-color="#242d28"],
+#jvmSvg [stop-color="#222120"] { stop-color: var(--surface-2); }
+#jvmSvg [stop-color="#181a1f"], #jvmSvg [stop-color="#1b221f"] { stop-color: var(--surface-1); }
+
+button:focus-visible, a:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
+}
+
+#sideDetailPanel {
+    width: min(450px, 100vw);
+}
+
+#sideDetailPanel > div:first-child {
+    height: auto;
+    min-height: 64px;
+    padding-block: 12px;
+}
+
+#detailTitle {
+    min-width: 0;
+    line-height: 1.35;
+}
+
+#detailTitle span { white-space: normal; }
+#btnClosePanel { flex: 0 0 auto; }
+
+#detailTitle span,
+#detailDesc,
+#microContent,
+#detailQnA {
+    overflow-wrap: anywhere;
+    word-break: keep-all;
+}
+
+#simulationCard {
+    width: min(800px, calc(100vw - 32px));
+}
+
+#simulationCard > .grid > div {
+    height: auto;
+    min-height: 14rem;
+}
+
+@media (max-width: 760px) {
+    header { padding-inline: 12px !important; }
+    header > div:first-child p { display: none; }
+    header > div:last-child { gap: 6px; }
+    header button { padding-inline: 10px !important; }
+    header button span { display: none; }
+
+    #simulationCard {
+        bottom: 12px;
+        padding: 16px;
+    }
+
+    #simulationCard > .grid {
+        display: flex;
+        max-height: 70vh;
+        flex-direction: column;
+        overflow-y: auto;
+    }
+
+    #simulationCard > .grid > div { height: auto; min-height: 180px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .zoom-target, #sideDetailPanel, #simulationCard { transition: none !important; }
+    .flow-path, .flow-path-fast { animation: none; }
+}

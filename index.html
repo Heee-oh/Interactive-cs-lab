@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="개발 핵심 개념을 시각적으로 탐색하는 인터랙티브 학습 페이지">
+    <title>Interactive CS Lab</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #202628;
+            --surface: #272e31;
+            --surface-hover: #2d3539;
+            --border: #49545a;
+            --text: #d8d5cc;
+            --muted: #a6adaa;
+            --accent: #8fb3b8;
+            --accent-soft: rgba(143, 179, 184, 0.12);
+            --tag: #a7b88d;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: Inter, Pretendard, "Noto Sans KR", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(circle at 15% 0%, rgba(143, 179, 184, 0.08), transparent 32rem),
+                var(--bg);
+        }
+
+        a { color: inherit; }
+
+        .container {
+            width: min(1120px, calc(100% - 40px));
+            margin: 0 auto;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 72px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 750;
+            letter-spacing: -0.02em;
+        }
+
+        .brand-mark {
+            display: grid;
+            width: 36px;
+            height: 36px;
+            place-items: center;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--accent);
+            background: var(--surface);
+        }
+
+        main { padding: 76px 0 96px; }
+
+        .eyebrow {
+            margin: 0 0 14px;
+            color: var(--accent);
+            font-size: 0.78rem;
+            font-weight: 800;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+        }
+
+        h1 {
+            max-width: 720px;
+            margin: 0;
+            font-size: clamp(2.15rem, 6vw, 4.25rem);
+            line-height: 1.08;
+            letter-spacing: -0.055em;
+        }
+
+        .intro {
+            max-width: 650px;
+            margin: 24px 0 0;
+            color: var(--muted);
+            font-size: clamp(1rem, 2vw, 1.12rem);
+            line-height: 1.75;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: end;
+            justify-content: space-between;
+            gap: 24px;
+            margin: 72px 0 22px;
+        }
+
+        h2 {
+            margin: 0;
+            font-size: 1.35rem;
+            letter-spacing: -0.025em;
+        }
+
+        .count {
+            color: var(--muted);
+            font-size: 0.86rem;
+        }
+
+        .topics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 18px;
+        }
+
+        .topic-card {
+            display: flex;
+            min-height: 250px;
+            flex-direction: column;
+            padding: 26px;
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            text-decoration: none;
+            background: var(--surface);
+            transition: transform 160ms ease, border-color 160ms ease, background-color 160ms ease;
+        }
+
+        .topic-card:hover {
+            transform: translateY(-3px);
+            border-color: var(--accent);
+            background: var(--surface-hover);
+        }
+
+        .topic-card:focus-visible {
+            outline: 3px solid var(--accent);
+            outline-offset: 3px;
+        }
+
+        .topic-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .topic-icon {
+            display: grid;
+            width: 48px;
+            height: 48px;
+            place-items: center;
+            border: 1px solid var(--border);
+            border-radius: 13px;
+            color: var(--accent);
+            background: var(--accent-soft);
+        }
+
+        .status {
+            padding: 5px 9px;
+            border: 1px solid rgba(167, 184, 141, 0.35);
+            border-radius: 999px;
+            color: var(--tag);
+            font-size: 0.72rem;
+            font-weight: 750;
+        }
+
+        .topic-card h3 {
+            margin: 26px 0 9px;
+            font-size: 1.35rem;
+            letter-spacing: -0.025em;
+        }
+
+        .topic-card p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 0.92rem;
+            line-height: 1.65;
+        }
+
+        .open-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: auto;
+            padding-top: 24px;
+            color: var(--accent);
+            font-size: 0.87rem;
+            font-weight: 750;
+        }
+
+        .open-label svg { transition: transform 160ms ease; }
+        .topic-card:hover .open-label svg { transform: translateX(4px); }
+
+        .empty-card {
+            justify-content: center;
+            border-style: dashed;
+            color: var(--muted);
+            text-align: center;
+            background: transparent;
+        }
+
+        .empty-card strong {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text);
+        }
+
+        footer {
+            padding: 28px 0;
+            border-top: 1px solid var(--border);
+            color: var(--muted);
+            font-size: 0.82rem;
+        }
+
+        @media (max-width: 600px) {
+            .container { width: min(100% - 28px, 1120px); }
+            main { padding-top: 52px; }
+            .section-header { margin-top: 56px; }
+            .topic-card { min-height: 230px; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .topic-card, .open-label svg { transition: none; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="brand">
+                <span class="brand-mark" aria-hidden="true">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M5 5h14v14H5zM9 1v4m6-4v4M9 19v4m6-4v4M1 9h4m-4 6h4m14-6h4m-4 6h4"/>
+                    </svg>
+                </span>
+                <span>Interactive CS Lab</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+        <section aria-labelledby="page-title">
+            <p class="eyebrow">Visual Learning Archive</p>
+            <h1 id="page-title">복잡한 개발 개념을<br>직접 탐색하며 이해하세요.</h1>
+            <p class="intro">구조를 확대하고 구성 요소를 눌러보며 핵심 동작 원리와 기술 면접 포인트를 학습하는 인터랙티브 문서 모음입니다.</p>
+        </section>
+
+        <section aria-labelledby="topics-title">
+            <div class="section-header">
+                <h2 id="topics-title">학습 주제</h2>
+                <span class="count">2개 주제</span>
+            </div>
+
+            <div class="topics">
+                <a class="topic-card" href="./java/jvm_interactive_explorer.html">
+                    <div class="topic-top">
+                        <span class="topic-icon" aria-hidden="true">
+                            <svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                                <rect x="4" y="4" width="16" height="16" rx="2"/>
+                                <path d="M9 9h6v6H9zM9 1v3m6-3v3M9 20v3m6-3v3M1 9h3m-3 6h3m16-6h3m-3 6h3"/>
+                            </svg>
+                        </span>
+                        <span class="status">학습 가능</span>
+                    </div>
+                    <h3>JVM Architecture</h3>
+                    <p>클래스 로더, 런타임 데이터 영역, 실행 엔진과 GC의 관계를 시각적으로 탐색합니다.</p>
+                    <span class="open-label">
+                        학습 시작
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="m9 18 6-6-6-6"/>
+                        </svg>
+                    </span>
+                </a>
+
+                <a class="topic-card" href="./java/g1_gc_interactive_explorer.html">
+                    <div class="topic-top">
+                        <span class="topic-icon" aria-hidden="true">
+                            <svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                                <path d="M4 5.5C4 4.12 7.58 3 12 3s8 1.12 8 2.5S16.42 8 12 8 4 6.88 4 5.5Z"/>
+                                <path d="M4 5.5v6C4 12.88 7.58 14 12 14s8-1.12 8-2.5v-6M4 11.5v6C4 18.88 7.58 20 12 20s8-1.12 8-2.5v-6"/>
+                                <path d="m9.5 11 1.5 1.5 3.5-3.5"/>
+                            </svg>
+                        </span>
+                        <span class="status">학습 가능</span>
+                    </div>
+                    <h3>G1 Garbage Collector</h3>
+                    <p>Region 기반 힙, Evacuation, Concurrent Mark와 Mixed GC의 전체 사이클을 탐색합니다.</p>
+                    <span class="open-label">
+                        학습 시작
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="m9 18 6-6-6-6"/>
+                        </svg>
+                    </span>
+                </a>
+
+                <div class="topic-card empty-card" aria-label="새 학습 주제 추가 예정">
+                    <strong>다음 주제를 준비 중입니다</strong>
+                    <span>새 HTML 학습 페이지와 카드를 추가해 확장할 수 있습니다.</span>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">Interactive CS Lab · Static learning pages</div>
+    </footer>
+</body>
+</html>

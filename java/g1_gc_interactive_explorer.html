@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>G1 GC Deep Dive - Interactive Visualizer</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts Inter & Nanum Gothic -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&amp;family=Nanum+Gothic:wght@400;700;800&amp;display=swap" rel="stylesheet">
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="../assets/css/explorer.css">
+</head>
+<body class="h-screen flex flex-col">
+
+    <!-- Header Panel -->
+    <header class="h-16 bg-[#1c1e24] border-b border-[#2d3139] flex items-center justify-between px-6 z-10 shrink-0">
+        <div class="flex items-center space-x-3">
+            <a href="../index.html" aria-label="학습 주제 목록으로 돌아가기" class="w-9 h-9 bg-[#21252b] hover:bg-[#2c313c] text-[#abb2bf] rounded-lg flex items-center justify-center border border-[#3e4451] transition duration-150">
+                <i class="fa-solid fa-arrow-left"></i>
+            </a>
+            <div class="bg-[#2d3139] p-2 rounded-lg border border-[#3e4451]">
+                <i class="fa-solid fa-microchip text-[#61afef] text-xl"></i>
+            </div>
+            <div>
+                <h1 class="text-base font-bold text-[#e5c07b] tracking-wide">G1 GC Interactive Deep-Dive</h1>
+                <p class="text-xs text-[#828997]">Region 기반 힙 구조와 Young·Mixed GC 사이클을 탐색하는 가이드</p>
+            </div>
+        </div>
+        <div class="flex items-center space-x-3">
+            <button id="btnStartSimulation" class="bg-[#3e4451] hover:bg-[#4b5263] text-[#98c379] border border-[#4b5263] px-4 py-2 rounded-lg text-sm font-semibold flex items-center space-x-2 shadow transition duration-200">
+                <i class="fa-solid fa-play"></i>
+                <span>G1 사이클 시뮬레이션</span>
+            </button>
+            <button id="btnResetZoom" class="bg-[#21252b] hover:bg-[#2c313c] text-[#abb2bf] px-3 py-2 rounded-lg text-sm font-medium flex items-center space-x-1 border border-[#3e4451] transition duration-150">
+                <i class="fa-solid fa-arrows-to-eye"></i>
+                <span>전체 보기</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <div class="flex-1 flex overflow-hidden relative">
+        
+        <!-- Left Help Panel -->
+        <div class="absolute top-4 left-4 z-10 bg-[#1c1e24]/90 backdrop-blur border border-[#2d3139] rounded-xl p-4 w-72 pointer-events-auto shadow-xl">
+            <h3 class="font-bold text-sm text-[#e5c07b] mb-2 flex items-center gap-1.5">
+                <i class="fa-solid fa-circle-info text-[#61afef]"></i> 조작 및 학습 가이드
+            </h3>
+            <ul class="text-xs text-[#828997] space-y-2 leading-relaxed">
+                <li class="flex items-start gap-1.5">
+                    <span class="text-[#61afef]">•</span>
+                    <span><strong>드래그 &amp; 휠:</strong> 마우스 드래그로 화면 이동, 휠을 조절하여 자유롭게 축소/확대가 가능합니다.</span>
+                </li>
+                <li class="flex items-start gap-1.5">
+                    <span class="text-[#98c379]">•</span>
+                    <span><strong>컴포넌트 클릭:</strong> 컴포넌트를 선택하면 해당 영역이 <strong>눈에 잘 띄는 중심부</strong>로 부드럽게 이동 및 줌인됩니다.</span>
+                </li>
+                <li class="flex items-start gap-1.5">
+                    <span class="text-[#d19a66]">•</span>
+                    <span><strong>시뮬레이션:</strong> 실제 코드 작동 원리에 따른 각 물리 공간 데이터 전송 애니메이션을 체험해 보세요.</span>
+                </li>
+            </ul>
+            <div class="mt-4 pt-3 border-t border-[#2d3139] flex justify-between items-center text-[11px] text-[#5c6370]">
+                <span>현재 확대 배율: <span id="lblZoomRatio" class="text-[#61afef] font-bold">100%</span></span>
+                <div class="flex space-x-1">
+                    <button id="btnZoomIn" class="w-6 h-6 bg-[#21252b] rounded flex items-center justify-center text-xs hover:bg-[#2c313c] text-[#abb2bf] border border-[#3e4451]"><i class="fa-solid fa-plus"></i></button>
+                    <button id="btnZoomOut" class="w-6 h-6 bg-[#21252b] rounded flex items-center justify-center text-xs hover:bg-[#2c313c] text-[#abb2bf] border border-[#3e4451]"><i class="fa-solid fa-minus"></i></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Interactive Canvas Area -->
+        <div id="canvasViewport" class="canvas-container overflow-hidden bg-[#14161b]">
+            <div id="canvasContent" class="zoom-target absolute w-[1920px] h-[1080px]">
+                
+                <!-- SVG Canvas with JVM Diagram (Soft Pastel Theme) -->
+                <svg id="jvmSvg" width="1920" height="1080" viewBox="0 0 1920 1080" fill="none" xmlns="http://www.w3.org/2000/svg" class="absolute inset-0">
+                    <defs>
+                        <linearGradient id="gradHeap" x1="0" y1="0" x2="1" y2="1">
+                            <stop offset="0%" stop-color="#282c34"/>
+                            <stop offset="100%" stop-color="#1e222b"/>
+                        </linearGradient>
+                        <linearGradient id="gradPanel" x1="0" y1="0" x2="1" y2="1">
+                            <stop offset="0%" stop-color="#21252b"/>
+                            <stop offset="100%" stop-color="#181a1f"/>
+                        </linearGradient>
+                        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#abb2bf" stroke-width="1"/>
+                        </pattern>
+                        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#c678dd"/>
+                        </marker>
+                    </defs>
+
+                    <rect width="100%" height="100%" fill="url(#grid)" opacity="0.06"/>
+
+                    <!-- Cycle paths -->
+                    <path d="M370 805 H405" stroke="#61afef" stroke-width="3" class="flow-path"/>
+                    <path d="M705 805 H740" stroke="#c678dd" stroke-width="3" class="flow-path"/>
+                    <path d="M1040 805 H1075" stroke="#d19a66" stroke-width="3" class="flow-path"/>
+                    <path d="M1375 805 H1410" stroke="#98c379" stroke-width="3" class="flow-path"/>
+                    <path d="M1560 700 C1560 625 960 610 700 620" stroke="#5c6370" stroke-width="2" class="flow-path"/>
+                    <circle id="simPulse" cx="-50" cy="-50" r="9" fill="#98c379" opacity="0"/>
+
+                    <!-- Region-based heap -->
+                    <g id="block_heap_regions" class="cursor-pointer group">
+                        <rect x="60" y="60" width="1180" height="520" rx="22" fill="url(#gradHeap)" stroke="#3e4451" stroke-width="3" class="focus-ring group-hover:stroke-[#61afef]"/>
+                        <rect x="60" y="60" width="1180" height="64" rx="22" fill="#2d3139"/>
+                        <text x="650" y="96" fill="#abb2bf" font-size="18" font-weight="bold" text-anchor="middle">G1 Region-Based Heap</text>
+                        <text x="650" y="114" fill="#828997" font-size="11" text-anchor="middle">동일 크기 Region이 실행 중 Eden / Survivor / Old / Humongous 역할을 동적으로 담당</text>
+
+                        <g id="block_eden" class="cursor-pointer group/eden">
+                            <rect x="90" y="150" width="120" height="82" rx="10" fill="#242d28" stroke="#98c379" stroke-width="2"/>
+                            <rect x="230" y="150" width="120" height="82" rx="10" fill="#242d28" stroke="#98c379" stroke-width="2"/>
+                            <rect x="90" y="252" width="120" height="82" rx="10" fill="#242d28" stroke="#98c379" stroke-width="2"/>
+                            <rect x="230" y="354" width="120" height="82" rx="10" fill="#242d28" stroke="#98c379" stroke-width="2"/>
+                            <text x="150" y="180" fill="#98c379" font-size="13" font-weight="bold" text-anchor="middle">EDEN</text>
+                            <text x="290" y="180" fill="#98c379" font-size="13" font-weight="bold" text-anchor="middle">EDEN</text>
+                            <text x="150" y="282" fill="#98c379" font-size="13" font-weight="bold" text-anchor="middle">EDEN</text>
+                            <text x="290" y="384" fill="#98c379" font-size="13" font-weight="bold" text-anchor="middle">EDEN</text>
+                            <circle id="sim_eden_obj" cx="145" cy="207" r="11" fill="#e5c07b" opacity="0"/>
+                        </g>
+
+                        <g id="block_survivor" class="cursor-pointer group/survivor">
+                            <rect x="370" y="150" width="120" height="82" rx="10" fill="#1e2d2d" stroke="#56b6c2" stroke-width="2"/>
+                            <rect x="370" y="252" width="120" height="82" rx="10" fill="#1e2d2d" stroke="#56b6c2" stroke-width="2"/>
+                            <rect x="370" y="456" width="120" height="82" rx="10" fill="#1e2d2d" stroke="#56b6c2" stroke-width="2"/>
+                            <text x="430" y="180" fill="#56b6c2" font-size="13" font-weight="bold" text-anchor="middle">SURVIVOR</text>
+                            <text x="430" y="282" fill="#56b6c2" font-size="13" font-weight="bold" text-anchor="middle">SURVIVOR</text>
+                            <text x="430" y="486" fill="#56b6c2" font-size="13" font-weight="bold" text-anchor="middle">SURVIVOR</text>
+                        </g>
+
+                        <g id="block_old" class="cursor-pointer group/old">
+                            <rect x="510" y="150" width="120" height="82" rx="10" fill="#21252b" stroke="#61afef" stroke-width="2"/>
+                            <rect x="650" y="150" width="120" height="82" rx="10" fill="#21252b" stroke="#61afef" stroke-width="2"/>
+                            <rect x="510" y="252" width="120" height="82" rx="10" fill="#21252b" stroke="#61afef" stroke-width="2"/>
+                            <rect x="650" y="354" width="120" height="82" rx="10" fill="#21252b" stroke="#61afef" stroke-width="2"/>
+                            <rect x="790" y="456" width="120" height="82" rx="10" fill="#21252b" stroke="#61afef" stroke-width="2"/>
+                            <text x="570" y="180" fill="#61afef" font-size="13" font-weight="bold" text-anchor="middle">OLD</text>
+                            <text x="710" y="180" fill="#61afef" font-size="13" font-weight="bold" text-anchor="middle">OLD</text>
+                            <text x="570" y="282" fill="#61afef" font-size="13" font-weight="bold" text-anchor="middle">OLD</text>
+                            <text x="710" y="384" fill="#61afef" font-size="13" font-weight="bold" text-anchor="middle">OLD</text>
+                            <text x="850" y="486" fill="#61afef" font-size="13" font-weight="bold" text-anchor="middle">OLD</text>
+                            <circle id="sim_old_obj" cx="690" cy="410" r="11" fill="#e5c07b" opacity="0"/>
+                        </g>
+
+                        <g id="block_humongous" class="cursor-pointer group/humongous">
+                            <rect x="930" y="150" width="260" height="82" rx="10" fill="#2d2529" stroke="#e06c75" stroke-width="2"/>
+                            <rect x="930" y="252" width="120" height="184" rx="10" fill="#2d2529" stroke="#e06c75" stroke-width="2"/>
+                            <line x1="1060" y1="150" x2="1060" y2="232" stroke="#e06c75" stroke-dasharray="5 4"/>
+                            <line x1="930" y1="344" x2="1050" y2="344" stroke="#e06c75" stroke-dasharray="5 4"/>
+                            <text x="1060" y="183" fill="#e06c75" font-size="13" font-weight="bold" text-anchor="middle">HUMONGOUS</text>
+                            <text x="990" y="294" fill="#e06c75" font-size="12" font-weight="bold" text-anchor="middle">H</text>
+                            <text x="990" y="395" fill="#e06c75" font-size="12" font-weight="bold" text-anchor="middle">H</text>
+                            <text x="1060" y="212" fill="#828997" font-size="10" text-anchor="middle">연속 Old Region 사용</text>
+                        </g>
+
+                        <g id="block_collection_set" class="cursor-pointer group/cset">
+                            <rect x="502" y="244" width="136" height="98" rx="14" fill="none" stroke="#e5c07b" stroke-width="3" stroke-dasharray="8 6"/>
+                            <rect x="642" y="346" width="136" height="98" rx="14" fill="none" stroke="#e5c07b" stroke-width="3" stroke-dasharray="8 6"/>
+                            <rect x="790" y="354" width="120" height="82" rx="10" fill="#2d3139" stroke="#e5c07b" stroke-width="2"/>
+                            <text x="850" y="385" fill="#e5c07b" font-size="11" font-weight="bold" text-anchor="middle">Collection Set</text>
+                            <text x="850" y="404" fill="#828997" font-size="9" text-anchor="middle">선택된 Old 후보</text>
+                            <path d="M790 395 H778 M642 395 H630 V342" fill="none" stroke="#e5c07b" stroke-width="2" stroke-dasharray="4 4"/>
+                            <g id="sim_pc_highlight" opacity="0">
+                                <rect x="510" y="252" width="120" height="82" rx="10" fill="#e5c07b" opacity="0.18"/>
+                                <rect x="650" y="354" width="120" height="82" rx="10" fill="#e5c07b" opacity="0.18"/>
+                            </g>
+                        </g>
+
+                        <g fill="#14161b" stroke="#5c6370" stroke-width="1.5" stroke-dasharray="5 5">
+                            <rect x="90" y="456" width="120" height="82" rx="10"/>
+                            <rect x="230" y="252" width="120" height="82" rx="10"/>
+                            <rect x="510" y="456" width="120" height="82" rx="10"/>
+                            <rect x="650" y="252" width="120" height="82" rx="10"/>
+                            <rect x="790" y="150" width="120" height="82" rx="10"/>
+                            <rect x="790" y="252" width="120" height="82" rx="10"/>
+                        </g>
+                        <text x="150" y="502" fill="#828997" font-size="12" text-anchor="middle">FREE</text>
+                        <text x="290" y="298" fill="#828997" font-size="12" text-anchor="middle">FREE</text>
+                        <text x="570" y="502" fill="#828997" font-size="12" text-anchor="middle">FREE</text>
+                        <text x="710" y="298" fill="#828997" font-size="12" text-anchor="middle">FREE</text>
+                        <text x="850" y="196" fill="#828997" font-size="12" text-anchor="middle">FREE</text>
+                        <text x="850" y="298" fill="#828997" font-size="12" text-anchor="middle">FREE</text>
+                    </g>
+
+                    <!-- Remembered set and pause model -->
+                    <g id="block_remembered_set" class="cursor-pointer group" transform="translate(1280,60)">
+                        <rect width="580" height="270" rx="22" fill="url(#gradPanel)" stroke="#3e4451" stroke-width="3" class="focus-ring group-hover:stroke-[#c678dd]"/>
+                        <rect width="580" height="58" rx="22" fill="#2d3139"/>
+                        <text x="290" y="35" fill="#abb2bf" font-size="16" font-weight="bold" text-anchor="middle">Remembered Set &amp; Card</text>
+                        <rect x="30" y="85" width="145" height="130" rx="12" fill="#21252b" stroke="#61afef" stroke-width="2"/>
+                        <rect x="405" y="85" width="145" height="130" rx="12" fill="#242d28" stroke="#98c379" stroke-width="2"/>
+                        <text x="102" y="112" fill="#61afef" font-size="12" font-weight="bold" text-anchor="middle">Outside CSet</text>
+                        <text x="477" y="112" fill="#98c379" font-size="12" font-weight="bold" text-anchor="middle">Inside CSet</text>
+                        <circle cx="105" cy="162" r="13" fill="#61afef" opacity="0.7"/>
+                        <circle cx="475" cy="162" r="13" fill="#98c379" opacity="0.7"/>
+                        <path d="M120 162 H455" stroke="#c678dd" stroke-width="3" marker-end="url(#arrow)"/>
+                        <rect x="210" y="132" width="160" height="58" rx="10" fill="#14161b" stroke="#c678dd"/>
+                        <text x="290" y="157" fill="#c678dd" font-size="12" font-weight="bold" text-anchor="middle">Card Entry</text>
+                        <text x="290" y="176" fill="#828997" font-size="10" text-anchor="middle">외부 → CSet 참조 위치 추적</text>
+                        <text x="290" y="242" fill="#828997" font-size="10" text-anchor="middle">정확한 객체 포인터 목록이 아니라 참조가 있을 수 있는 근사 위치를 기록</text>
+                    </g>
+
+                    <g id="block_pause_goal" class="cursor-pointer group" transform="translate(1280,350)">
+                        <rect width="580" height="230" rx="22" fill="url(#gradPanel)" stroke="#3e4451" stroke-width="3" class="focus-ring group-hover:stroke-[#d19a66]"/>
+                        <rect width="580" height="58" rx="22" fill="#2d3139"/>
+                        <text x="290" y="35" fill="#abb2bf" font-size="16" font-weight="bold" text-anchor="middle">Pause-Time Goal Model</text>
+                        <text x="40" y="96" fill="#d19a66" font-size="12" font-weight="bold">-XX:MaxGCPauseMillis</text>
+                        <rect x="40" y="118" width="500" height="18" rx="9" fill="#14161b"/>
+                        <rect x="40" y="118" width="330" height="18" rx="9" fill="#d19a66" opacity="0.75"/>
+                        <line x1="400" y1="108" x2="400" y2="148" stroke="#e5c07b" stroke-width="2"/>
+                        <text x="400" y="164" fill="#e5c07b" font-size="10" text-anchor="middle">목표</text>
+                        <text x="40" y="196" fill="#abb2bf" font-size="11">예측 모델로 Collection Set 크기를 조절</text>
+                        <text x="540" y="196" fill="#e06c75" font-size="11" text-anchor="end">보장 아님 · Real-time GC 아님</text>
+                    </g>
+
+                    <!-- G1 cycle -->
+                    <rect x="60" y="620" width="1800" height="390" rx="22" fill="url(#gradPanel)" stroke="#3e4451" stroke-width="3"/>
+                    <text x="100" y="660" fill="#abb2bf" font-size="17" font-weight="bold">G1 Collection Cycle</text>
+                    <text x="100" y="681" fill="#828997" font-size="11">Young-Only Phase와 Space-Reclamation Phase가 반복됨</text>
+
+                    <g id="block_young_gc" class="cursor-pointer group" transform="translate(90,710)">
+                        <rect width="280" height="190" rx="17" fill="#242d28" stroke="#98c379" stroke-width="3"/>
+                        <text x="140" y="35" fill="#98c379" font-size="14" font-weight="bold" text-anchor="middle">1. Young GC</text>
+                        <text x="140" y="62" fill="#abb2bf" font-size="11" text-anchor="middle">STW Evacuation Pause</text>
+                        <rect x="25" y="88" width="65" height="55" rx="8" fill="#1b221f" stroke="#98c379"/>
+                        <rect x="108" y="88" width="65" height="55" rx="8" fill="#1e2d2d" stroke="#56b6c2"/>
+                        <rect x="190" y="88" width="65" height="55" rx="8" fill="#21252b" stroke="#61afef"/>
+                        <text x="57" y="120" fill="#98c379" font-size="10" text-anchor="middle">Eden</text>
+                        <text x="140" y="120" fill="#56b6c2" font-size="10" text-anchor="middle">Survivor</text>
+                        <text x="222" y="120" fill="#61afef" font-size="10" text-anchor="middle">Old</text>
+                        <text x="140" y="170" fill="#828997" font-size="10" text-anchor="middle">생존 객체를 나이·조건에 따라 복사</text>
+                    </g>
+
+                    <g id="block_concurrent_mark" class="cursor-pointer group" transform="translate(405,710)">
+                        <rect width="300" height="190" rx="17" fill="#21252b" stroke="#c678dd" stroke-width="3"/>
+                        <text x="150" y="35" fill="#c678dd" font-size="14" font-weight="bold" text-anchor="middle">2. Concurrent Mark</text>
+                        <text x="150" y="62" fill="#abb2bf" font-size="11" text-anchor="middle">Concurrent Start → Marking</text>
+                        <circle cx="65" cy="115" r="25" fill="#14161b" stroke="#c678dd" stroke-width="2"/>
+                        <circle cx="150" cy="115" r="25" fill="#14161b" stroke="#c678dd" stroke-width="2"/>
+                        <circle cx="235" cy="115" r="25" fill="#14161b" stroke="#5c6370" stroke-width="2"/>
+                        <path d="M90 115 H125 M175 115 H210" stroke="#c678dd" stroke-width="2"/>
+                        <text x="150" y="169" fill="#828997" font-size="10" text-anchor="middle">애플리케이션과 동시에 Old 생존성 분석</text>
+                    </g>
+
+                    <g id="block_remark_cleanup" class="cursor-pointer group" transform="translate(740,710)">
+                        <rect width="300" height="190" rx="17" fill="#2e2d2a" stroke="#d19a66" stroke-width="3"/>
+                        <text x="150" y="35" fill="#d19a66" font-size="14" font-weight="bold" text-anchor="middle">3. Remark / Cleanup</text>
+                        <text x="150" y="62" fill="#abb2bf" font-size="11" text-anchor="middle">짧은 STW 구간</text>
+                        <rect x="35" y="90" width="95" height="48" rx="8" fill="#14161b" stroke="#d19a66"/>
+                        <rect x="170" y="90" width="95" height="48" rx="8" fill="#14161b" stroke="#d19a66"/>
+                        <text x="82" y="119" fill="#d19a66" font-size="10" text-anchor="middle">Mark 확정</text>
+                        <text x="217" y="119" fill="#d19a66" font-size="10" text-anchor="middle">후보 계산</text>
+                        <text x="150" y="169" fill="#828997" font-size="10" text-anchor="middle">비어 있는 Region 회수 · CSet 후보 준비</text>
+                    </g>
+
+                    <g id="block_mixed_gc" class="cursor-pointer group" transform="translate(1075,710)">
+                        <rect width="300" height="190" rx="17" fill="#242d28" stroke="#98c379" stroke-width="3"/>
+                        <text x="150" y="35" fill="#98c379" font-size="14" font-weight="bold" text-anchor="middle">4. Mixed GC</text>
+                        <text x="150" y="62" fill="#abb2bf" font-size="11" text-anchor="middle">Young + 선택된 Old Region</text>
+                        <rect x="35" y="90" width="65" height="50" rx="8" fill="#1b221f" stroke="#98c379"/>
+                        <rect x="118" y="90" width="65" height="50" rx="8" fill="#21252b" stroke="#61afef"/>
+                        <rect x="200" y="90" width="65" height="50" rx="8" fill="#14161b" stroke="#5c6370" stroke-dasharray="4 4"/>
+                        <text x="67" y="120" fill="#98c379" font-size="10" text-anchor="middle">Young</text>
+                        <text x="150" y="120" fill="#61afef" font-size="10" text-anchor="middle">Old</text>
+                        <text x="232" y="120" fill="#828997" font-size="10" text-anchor="middle">Free</text>
+                        <text x="150" y="169" fill="#828997" font-size="10" text-anchor="middle">효율이 높은 Old Region부터 점진 회수</text>
+                    </g>
+
+                    <g id="block_full_gc" class="cursor-pointer group" transform="translate(1410,710)">
+                        <rect width="300" height="190" rx="17" fill="#2d2529" stroke="#e06c75" stroke-width="3"/>
+                        <text x="150" y="35" fill="#e06c75" font-size="14" font-weight="bold" text-anchor="middle">Fallback: Full GC</text>
+                        <text x="150" y="62" fill="#abb2bf" font-size="11" text-anchor="middle">STW Full-Heap Compaction</text>
+                        <path d="M50 105 H250" stroke="#e06c75" stroke-width="12" opacity="0.25"/>
+                        <path d="M80 85 V125 M120 85 V125 M160 85 V125 M200 85 V125" stroke="#e06c75" stroke-width="2"/>
+                        <text x="150" y="163" fill="#828997" font-size="10" text-anchor="middle">Evacuation Failure 등의 최후 수단</text>
+                        <text x="150" y="179" fill="#828997" font-size="10" text-anchor="middle">전체 힙 압축으로 매우 느릴 수 있음</text>
+                    </g>
+                </svg>
+
+            </div>
+        </div>
+
+        <!-- Right Details / Explanation Side-Panel (Muted Dark Theme) -->
+        <div id="sideDetailPanel" class="w-[450px] bg-[#1c1e24] border-l border-[#2d3139] flex flex-col h-full transform translate-x-full transition-transform duration-300 absolute right-0 top-0 z-20 shadow-2xl">
+            <!-- Close Button Header -->
+            <div class="h-16 border-b border-[#2d3139] px-6 flex items-center justify-between bg-[#1e222b]">
+                <h2 id="detailTitle" class="text-base font-bold text-[#e5c07b] flex items-center gap-2">
+                    <i class="fa-solid fa-cube text-[#61afef]"></i>
+                    <span>컴포넌트 상세분석</span>
+                </h2>
+                <button id="btnClosePanel" class="w-8 h-8 rounded-lg bg-[#2d3139] hover:bg-[#3e4451] text-[#abb2bf] flex items-center justify-center transition-colors border border-[#3e4451]">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- Scrollable Content -->
+            <div id="detailContent" class="flex-1 overflow-y-auto p-6 space-y-6">
+                <!-- Fallback Info -->
+                <div id="detailFallback" class="text-center py-20 text-[#5c6370]">
+                    <i class="fa-solid fa-search-plus text-5xl mb-4 text-[#2d3139]"></i>
+                    <p class="text-sm">G1의 특정 영역이나 단계를 선택하여<br>상세 메커니즘을 확인하세요.</p>
+                </div>
+
+                <!-- Dynamic Content Area -->
+                <div id="detailMain" class="hidden space-y-6">
+                    <!-- Badges -->
+                    <div class="flex flex-wrap gap-2" id="detailTags"></div>
+
+                    <!-- Description Text -->
+                    <div class="space-y-3">
+                        <h4 class="text-xs font-bold uppercase tracking-wider text-[#e5c07b] flex items-center gap-1.5 border-b border-[#2d3139] pb-2">
+                            <i class="fa-solid fa-align-left text-[#61afef]"></i> 개요 및 역할
+                        </h4>
+                        <p id="detailDesc" class="text-sm text-[#abb2bf] leading-relaxed"></p>
+                    </div>
+
+                    <!-- Inner Structure Detailed Visualization -->
+                    <div id="microVisualizer" class="bg-[#14161b] p-4 rounded-xl border border-[#2d3139]">
+                        <h4 class="text-xs font-bold text-[#e5c07b] uppercase tracking-wider mb-3 pb-1 border-b border-[#2d3139]" id="microVisualTitle">정밀 구조 분석</h4>
+                        <div id="microContent" class="text-xs text-[#abb2bf] space-y-2"></div>
+                    </div>
+
+                    <!-- Technical Core Q&A -->
+                    <div class="space-y-4">
+                        <h4 class="text-xs font-bold uppercase tracking-wider text-[#e5c07b] flex items-center gap-1.5 border-b border-[#2d3139] pb-2">
+                            <i class="fa-solid fa-question-circle text-[#61afef]"></i> 면접 및 학습 핵심 키워드
+                        </h4>
+                        <div id="detailQnA" class="space-y-3"></div>
+                    </div>
+
+                    <div class="space-y-2">
+                        <h4 class="text-xs font-bold uppercase tracking-wider text-[#e5c07b] border-b border-[#2d3139] pb-2">공식 참고 문서</h4>
+                        <div class="text-xs text-[#828997] leading-relaxed space-y-1">
+                            <a class="block text-[#61afef] hover:underline" href="https://docs.oracle.com/en/java/javase/25/gctuning/garbage-first-g1-garbage-collector1.html" target="_blank" rel="noopener noreferrer">Oracle — Garbage-First (G1) Garbage Collector</a>
+                            <a class="block text-[#61afef] hover:underline" href="https://docs.oracle.com/en/java/javase/25/gctuning/garbage-first-garbage-collector-tuning.html" target="_blank" rel="noopener noreferrer">Oracle — G1 GC Tuning</a>
+                            <a class="block text-[#61afef] hover:underline" href="https://docs.oracle.com/en/java/javase/25/docs/specs/man/java.html" target="_blank" rel="noopener noreferrer">Oracle — java Command / G1 Options</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Simulation Overlay Control Card -->
+        <div id="simulationCard" class="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-[#1c1e24] border border-[#3e4451] rounded-2xl p-6 w-[800px] z-30 shadow-2xl transition-all duration-300 hidden opacity-0">
+            <div class="flex items-center justify-between mb-4 border-b border-[#2d3139] pb-3">
+                <div class="flex items-center space-x-2">
+                    <span class="w-2.5 h-2.5 rounded-full bg-[#98c379]"></span>
+                    <h3 class="font-bold text-[#e5c07b] text-sm">G1 GC 수집 사이클 애니메이션</h3>
+                </div>
+                <button id="btnExitSim" class="text-[#abb2bf] hover:text-[#e06c75] transition-colors text-sm">
+                    <i class="fa-solid fa-circle-xmark text-lg"></i>
+                </button>
+            </div>
+            
+            <div class="grid grid-cols-5 gap-4">
+                <!-- Interactive Steps -->
+                <div class="col-span-2 bg-[#14161b] rounded-xl p-3.5 border border-[#2d3139] flex flex-col justify-between h-56">
+                    <div class="space-y-1">
+                        <span class="text-[10px] font-bold uppercase tracking-wider text-[#98c379]">현재 동작 단계</span>
+                        <h4 id="simStepTitle" class="text-xs font-bold text-[#e5c07b]">1. Eden 객체 할당</h4>
+                        <p id="simStepDesc" class="text-[11px] text-[#abb2bf] leading-relaxed mt-1"></p>
+                    </div>
+                    
+                    <div class="flex items-center justify-between pt-2 border-t border-[#2d3139]">
+                        <span class="text-[11px] text-[#5c6370] font-bold" id="simProgress">Step 1 / 6</span>
+                        <div class="flex space-x-2">
+                            <button id="btnPrevSimStep" class="bg-[#21252b] hover:bg-[#2c313c] text-[#abb2bf] w-8 h-8 rounded flex items-center justify-center text-xs border border-[#3e4451] disabled:opacity-40">
+                                <i class="fa-solid fa-arrow-left"></i>
+                            </button>
+                            <button id="btnNextSimStep" class="bg-[#2e3440] hover:bg-[#3b4252] text-[#98c379] border border-[#4c566a] w-16 h-8 rounded flex items-center justify-center text-xs font-bold gap-1">
+                                <span>다음</span>
+                                <i class="fa-solid fa-arrow-right"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live Visual Reference Block -->
+                <div class="col-span-3 bg-[#14161b]/60 rounded-xl p-3.5 border border-[#2d3139] flex flex-col justify-between h-56">
+                    <div class="space-y-1 overflow-y-auto max-h-40">
+                        <span class="text-[10px] font-bold uppercase tracking-wider text-[#61afef]">데이터 이동 상태</span>
+                        <div id="simLogList" class="space-y-1.5 text-[11px] font-mono"></div>
+                    </div>
+                    <div class="h-1 bg-[#21252b] rounded-full overflow-hidden">
+                        <div id="simProgressBar" class="h-full bg-[#61afef] transition-all duration-300" style="width: 16%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Javascript Section -->
+    <script>
+        const COMPONENT_DATA = {
+            'block_heap_regions': {
+                title: 'G1 Region-Based Heap (Region 기반 힙)',
+                tags: ['Equal-sized Regions', 'Dynamic Role', 'Young', 'Old'],
+                desc: 'G1은 힙을 동일한 크기의 Region 집합으로 나눕니다. 각 Region은 연속된 가상 메모리지만, 같은 세대의 Region들이 힙 전체에서 물리적으로 연속할 필요는 없습니다.<br><br>Region은 할당과 회수의 기본 단위이며 실행 중 Eden, Survivor, Old 또는 Free 역할을 동적으로 담당합니다.',
+                microTitle: 'Region 역할 구성',
+                micro: `<div class="grid grid-cols-4 gap-2 text-[10px] text-center"><div class="bg-[#242d28] p-2 rounded text-[#98c379]">Eden</div><div class="bg-[#1e2d2d] p-2 rounded text-[#56b6c2]">Survivor</div><div class="bg-[#21252b] p-2 rounded text-[#61afef]">Old</div><div class="bg-[#14161b] p-2 rounded text-[#828997]">Free</div></div>`,
+                questions: [{ q: 'Region 크기는 고정인가요?', a: '한 JVM 실행 안에서는 Region 크기가 같지만, 시작 시 힙 크기와 설정을 바탕으로 ergonomically 결정됩니다. 필요하면 -XX:G1HeapRegionSize로 지정할 수 있습니다.' }]
+            },
+            'block_eden': {
+                title: 'Eden Regions (신규 객체 할당)',
+                tags: ['Young Generation', 'Allocation', 'TLAB', 'Evacuation'],
+                desc: '일반적인 객체는 Young Generation의 Eden Region에 할당됩니다. G1은 pause 목표와 과거 수집 비용을 바탕으로 다음 Young GC에 사용할 Young 영역 크기를 지속적으로 조절합니다.<br><br>Humongous Object는 예외적으로 Old Generation에 직접 할당됩니다.',
+                microTitle: '일반 할당 흐름',
+                micro: `<div class="flex items-center justify-between text-[11px]"><span class="bg-[#21252b] p-2 rounded">Application</span><i class="fa-solid fa-arrow-right text-[#5c6370]"></i><span class="bg-[#242d28] p-2 rounded text-[#98c379]">TLAB / Eden</span><i class="fa-solid fa-arrow-right text-[#5c6370]"></i><span class="bg-[#1e2d2d] p-2 rounded">Young GC</span></div>`,
+                questions: [{ q: 'Eden 비율을 고정하는 것이 좋은가요?', a: 'Oracle은 우선 G1 기본 ergonomics를 사용하고 최대 힙과 pause 목표만 조정할 것을 권장합니다. Young 크기를 고정하면 pause-time 제어 능력이 떨어질 수 있습니다.' }]
+            },
+            'block_survivor': {
+                title: 'Survivor Regions (생존 객체)',
+                tags: ['Object Age', 'Copying', 'Promotion', 'Young GC'],
+                desc: 'Young GC에서 살아남은 객체는 보통 Survivor Region으로 복사됩니다. 객체의 나이와 Survivor 용량 등의 조건에 따라 Old Region으로 승격될 수 있습니다.<br><br>G1의 회수는 live object를 다른 Region으로 복사하는 evacuation 방식이므로, 완료된 source Region 전체를 빠르게 재사용할 수 있습니다.',
+                microTitle: '생존 객체의 목적지',
+                micro: `<div class="space-y-2 text-[11px]"><div class="border-l-2 border-[#56b6c2] pl-2">짧게 생존 → Survivor Region</div><div class="border-l-2 border-[#61afef] pl-2">충분히 오래 생존 또는 공간 압력 → Old Region</div></div>`,
+                questions: [{ q: 'Young GC가 객체를 제자리에서 압축하나요?', a: '일반적으로 collection set의 live object를 Survivor 또는 Old destination Region으로 복사하고 참조를 갱신합니다. source Region은 비워져 재사용됩니다.' }]
+            },
+            'block_old': {
+                title: 'Old Regions (장기 생존 객체)',
+                tags: ['Old Generation', 'Promotion', 'Marking', 'Mixed GC'],
+                desc: '여러 수집을 거쳐 살아남은 객체는 Old Region으로 승격됩니다. Concurrent Mark는 Old Generation의 live data를 분석하고, 이후 Mixed GC가 회수 효율이 높은 Old Region을 Young Region과 함께 수집합니다.',
+                microTitle: 'Old Region 회수 조건',
+                micro: `<ul class="list-disc list-inside space-y-1 text-[11px]"><li>Concurrent Mark로 live 비율과 연결성 분석</li><li>회수 효율이 높은 Region을 후보로 선정</li><li>pause 예산에 맞춰 Collection Set에 포함</li></ul>`,
+                questions: [{ q: 'Mixed GC가 Old 전체를 한 번에 수집하나요?', a: '아닙니다. 여러 번의 Mixed collection에 걸쳐 선택된 Old Region을 점진적으로 회수합니다.' }]
+            },
+            'block_humongous': {
+                title: 'Humongous Objects (대형 객체)',
+                tags: ['Half Region', 'Contiguous Regions', 'Old Generation', 'Fragmentation'],
+                desc: '크기가 Region의 절반 이상인 객체는 Humongous Object로 취급됩니다. 하나 이상의 연속 Region을 사용하며 Old Generation에 직접 할당됩니다.<br><br>마지막 Region의 남는 공간은 해당 객체가 회수될 때까지 다른 할당에 쓰지 못해 단편화와 조기 GC의 원인이 될 수 있습니다.',
+                microTitle: 'Humongous 할당',
+                micro: `<div class="grid grid-cols-3 gap-1 text-center text-[10px]"><div class="bg-[#2d2529] p-2 rounded text-[#e06c75]">Start H</div><div class="bg-[#2d2529] p-2 rounded text-[#e06c75]">Continues</div><div class="bg-[#2d2529] p-2 rounded text-[#828997]">Unused tail</div></div>`,
+                questions: [{ q: 'Humongous Object는 일반 evacuation에서 이동하나요?', a: 'G1은 보통 이동시키지 않고 생존 여부를 판단해 죽은 경우 Region을 회수합니다. 매우 느린 최후 수단의 수집에서만 이동할 수 있습니다.' }]
+            },
+            'block_collection_set': {
+                title: 'Collection Set (CSet)',
+                tags: ['Source Regions', 'Pause Budget', 'Candidates', 'Efficiency'],
+                desc: 'Collection Set은 한 번의 GC pause에서 회수할 source Region 집합입니다. Young Region, 필요한 Humongous Region, 그리고 회수 효율이 높은 Old 후보 Region 등이 포함될 수 있습니다.<br><br>G1은 예측한 비용과 pause 목표를 바탕으로 mandatory/optional 후보를 조합합니다.',
+                microTitle: '선정 기준',
+                micro: `<div class="space-y-2 text-[11px]"><p><strong class="text-[#98c379]">효율:</strong> 적은 live data로 많은 공간 회수</p><p><strong class="text-[#61afef]">연결성:</strong> 외부 참조 처리 비용 고려</p><p><strong class="text-[#e5c07b]">예산:</strong> pause 목표 내 예상 작업량</p></div>`,
+                questions: [{ q: 'Garbage-First라는 이름은 무엇을 뜻하나요?', a: '회수 가능한 garbage가 많아 효율이 높은 Region을 우선 선택하는 전략에서 유래합니다.' }]
+            },
+            'block_remembered_set': {
+                title: 'Remembered Set & Cards',
+                tags: ['Cross-Region Reference', 'Card', 'Write Barrier', 'Refinement'],
+                desc: 'Collection Set 밖에서 안쪽 객체를 가리키는 참조를 모두 찾으려면 힙 전체를 스캔해야 합니다. G1은 이를 피하기 위해 외부 참조가 있을 수 있는 위치를 card 단위로 Remembered Set에 기록합니다.<br><br>GC 중 이 정보를 이용해 이동된 객체를 가리키는 외부 참조를 찾아 갱신합니다.',
+                microTitle: '참조 추적 흐름',
+                micro: `<div class="text-[11px] space-y-2"><p>객체 참조 변경 → write barrier가 card를 dirty 표시</p><p>refinement 처리 → 관련 Remembered Set 갱신</p><p>GC pause → CSet 외부의 incoming reference 탐색</p></div>`,
+                questions: [{ q: 'Remembered Set은 정확한 객체 포인터 목록인가요?', a: 'Oracle 문서상 메모리를 절약하기 위해 근사 위치를 card로 표현합니다. GC 시 해당 위치를 검사해 실제 참조를 찾습니다.' }]
+            },
+            'block_pause_goal': {
+                title: 'Pause-Time Goal (일시 정지 목표)',
+                tags: ['MaxGCPauseMillis', 'Prediction Model', 'Trade-off', 'Not Real-time'],
+                desc: 'G1은 과거 애플리케이션 동작과 GC 비용을 모델링해 각 pause의 Collection Set 크기를 정합니다. -XX:MaxGCPauseMillis는 최대 정지 시간의 보장이 아니라 G1이 맞추려고 시도하는 목표입니다.<br><br>목표를 지나치게 낮추면 더 잦은 GC와 처리량 저하가 발생할 수 있습니다.',
+                microTitle: '기본 튜닝 방향',
+                micro: `<div class="space-y-2 text-[11px]"><p><code>-Xmx</code>로 필요한 최대 힙 확보</p><p><code>-XX:MaxGCPauseMillis</code>로 지연 목표 표현</p><p>GC 로그로 Full GC·긴 pause의 실제 원인 확인</p></div>`,
+                questions: [{ q: 'G1은 실시간 GC인가요?', a: '아닙니다. 설정된 pause 목표를 높은 확률로 맞추려고 하지만 특정 pause의 상한을 보장하지 않습니다.' }]
+            },
+            'block_young_gc': {
+                title: 'Young GC / Evacuation Pause',
+                tags: ['Stop-The-World', 'Eden', 'Survivor', 'Promotion'],
+                desc: 'Eden이 차면 G1은 Young Region을 Collection Set으로 선택해 stop-the-world evacuation pause를 수행합니다. live object는 Survivor 또는 Old Region으로 복사되고 참조가 갱신됩니다.<br><br>복사가 끝난 source Region은 Free Region으로 반환됩니다.',
+                microTitle: 'Young GC 핵심 단계',
+                micro: `<ol class="list-decimal list-inside space-y-1 text-[11px]"><li>Collection Set 준비</li><li>roots와 Remembered Set 스캔</li><li>live object 병렬 evacuation</li><li>참조 갱신 및 Region 재사용</li></ol>`,
+                questions: [{ q: 'Young GC 중 애플리케이션 스레드는 실행되나요?', a: 'Evacuation pause 동안에는 애플리케이션 스레드가 정지합니다. G1은 작업을 병렬화하고 CSet 크기를 조절해 pause 목표를 맞추려 합니다.' }]
+            },
+            'block_concurrent_mark': {
+                title: 'Concurrent Marking Cycle',
+                tags: ['Concurrent Start', 'SATB', 'Old Liveness', 'IHOP'],
+                desc: 'Old Generation 점유가 IHOP 기준에 도달하면 일반 Young GC 대신 Concurrent Start collection이 marking cycle을 시작할 수 있습니다. 주요 marking 작업은 애플리케이션과 동시에 진행됩니다.<br><br>G1은 SATB(Snapshot-At-The-Beginning) 방식을 사용해 marking 시작 시점의 live 객체를 보수적으로 추적합니다.',
+                microTitle: 'Marking 구간',
+                micro: `<div class="flex items-center justify-between text-[10px]"><span>Concurrent Start</span><i class="fa-solid fa-arrow-right text-[#5c6370]"></i><span class="text-[#c678dd]">Concurrent Mark</span><i class="fa-solid fa-arrow-right text-[#5c6370]"></i><span>Remark</span></div>`,
+                questions: [{ q: 'Concurrent Mark가 모든 pause를 없애나요?', a: '아닙니다. 주요 marking은 concurrent지만 시작 collection, Remark, Cleanup 일부 작업과 evacuation은 stop-the-world 구간을 포함합니다.' }]
+            },
+            'block_remark_cleanup': {
+                title: 'Remark & Cleanup',
+                tags: ['Stop-The-World', 'Reference Processing', 'Class Unloading', 'Candidates'],
+                desc: 'Remark pause는 concurrent marking 결과를 마무리하고 reference processing과 class unloading 등을 수행합니다. Cleanup은 완전히 비어 있는 Region을 회수하고 Space-Reclamation Phase 진행 여부와 Old 후보 정보를 확정합니다.',
+                microTitle: 'Marking 종료 처리',
+                micro: `<div class="grid grid-cols-2 gap-2 text-[11px]"><div class="bg-[#21252b] p-2 rounded"><strong class="text-[#d19a66]">Remark</strong><br>Mark 확정·참조 처리</div><div class="bg-[#21252b] p-2 rounded"><strong class="text-[#d19a66]">Cleanup</strong><br>빈 Region 회수·후보 준비</div></div>`,
+                questions: [{ q: 'Remark 이후 바로 Old 전체가 회수되나요?', a: '아닙니다. Prepare Mixed를 거친 뒤 여러 Mixed GC에서 선택된 Old Region을 점진적으로 회수합니다.' }]
+            },
+            'block_mixed_gc': {
+                title: 'Mixed GC / Space-Reclamation Phase',
+                tags: ['Young + Old', 'Incremental', 'Evacuation', 'Collection Efficiency'],
+                desc: 'Mixed GC는 모든 Young Region과 선택된 Old 후보 Region을 같은 pause에서 evacuation합니다. 여러 번의 Mixed collection으로 Old 공간을 점진적으로 회수하며, 더 수집하는 효율이 낮다고 판단되면 이 phase를 종료합니다.',
+                microTitle: 'Mixed Collection Set',
+                micro: `<div class="flex gap-2 text-[10px] text-center"><span class="flex-1 bg-[#242d28] p-2 rounded text-[#98c379]">Young Regions</span><span class="text-[#828997] self-center">+</span><span class="flex-1 bg-[#21252b] p-2 rounded text-[#61afef]">Selected Old</span></div>`,
+                questions: [{ q: 'Mixed GC와 Full GC의 차이는?', a: 'Mixed GC는 선택한 Region을 evacuation하는 일반 G1 수집입니다. Full GC는 전체 힙을 stop-the-world 방식으로 in-place compact하는 최후 수단이며 훨씬 느릴 수 있습니다.' }]
+            },
+            'block_full_gc': {
+                title: 'Full GC Fallback',
+                tags: ['Fallback', 'Stop-The-World', 'Full Heap', 'Compaction'],
+                desc: 'G1이 evacuation할 destination 공간을 확보하지 못하는 등의 상황에서는 Full GC로 넘어갈 수 있습니다. Full GC는 전체 힙을 대상으로 in-place compaction을 수행하며 긴 pause를 유발할 수 있습니다.<br><br>반복되는 Full GC는 단순 pause 목표 조정보다 힙 여유, allocation/promotion 압력, Humongous allocation을 먼저 진단해야 합니다.',
+                microTitle: '운영 진단 체크',
+                micro: `<ul class="list-disc list-inside space-y-1 text-[11px]"><li><code>-Xlog:gc*</code>로 원인과 phase 확인</li><li>Evacuation Failure / Allocation Failure 확인</li><li>live set 대비 힙 여유와 Humongous allocation 점검</li></ul>`,
+                questions: [{ q: 'G1에서 Full GC는 정상적인 주기 단계인가요?', a: '아닙니다. 일반 cycle의 목표 경로가 아니라 공간 부족 등에 대응하는 fallback입니다. 지속적으로 발생하면 원인 분석이 필요합니다.' }]
+            }
+        };
+
+        const SIMULATION_STEPS = [
+            {
+                step: 1,
+                title: "1단계: Eden Region에 객체 할당",
+                desc: "일반적인 신규 객체는 Young Generation의 <strong>Eden Region</strong>에 할당됩니다. G1은 연속된 거대한 Eden 공간 대신 필요한 수의 Region에 Eden 역할을 부여합니다.",
+                logs: [
+                    "✓ 애플리케이션 스레드가 신규 객체 할당 요청.",
+                    "✓ Free Region 일부가 Eden 역할로 사용됨.",
+                    "✓ 객체가 Eden Region에 할당됨."
+                ],
+                targetBlock: "block_eden",
+                pulseFrom: [90, 207],
+                pulseTo: [145, 207]
+            },
+            {
+                step: 2,
+                title: "2단계: Young GC Collection Set 구성",
+                desc: "Eden이 차면 G1은 Young Region을 <strong>Collection Set</strong>으로 선택하고 stop-the-world evacuation pause를 시작합니다. Remembered Set으로 CSet 밖에서 들어오는 참조도 찾습니다.",
+                logs: [
+                    "✓ Young Region을 Collection Set으로 선택.",
+                    "✓ 애플리케이션 스레드 일시 정지(STW).",
+                    "✓ GC roots와 Remembered Set 스캔 시작."
+                ],
+                targetBlock: "block_young_gc",
+                pulseFrom: [145, 207],
+                pulseTo: [230, 805]
+            },
+            {
+                step: 3,
+                title: "3단계: 생존 객체 Evacuation",
+                desc: "live object를 destination Survivor 또는 Old Region으로 병렬 복사하고 모든 관련 참조를 갱신합니다. source Region은 비워져 다시 사용할 수 있습니다.",
+                logs: [
+                    "✓ 도달 가능한 live object 식별.",
+                    "✓ 객체 나이와 공간 조건에 따라 destination 결정.",
+                    "✓ Survivor/Old로 복사 후 source Region 반환."
+                ],
+                targetBlock: "block_survivor",
+                pulseFrom: [145, 207],
+                pulseTo: [430, 191]
+            },
+            {
+                step: 4,
+                title: "4단계: Concurrent Marking Cycle",
+                desc: "Old 점유가 IHOP 기준에 도달하면 Concurrent Start collection이 marking을 시작합니다. 주요 작업은 애플리케이션과 동시에 진행되며 Old Region의 live data를 분석합니다.",
+                logs: [
+                    "✓ Concurrent Start young collection 수행.",
+                    "✓ SATB 기반 concurrent marking 진행.",
+                    "✓ Old Region별 live data와 회수 효율 분석."
+                ],
+                targetBlock: "block_concurrent_mark",
+                pulseFrom: [370, 805],
+                pulseTo: [555, 805]
+            },
+            {
+                step: 5,
+                title: "5단계: Remark와 Cleanup",
+                desc: "<strong>Remark</strong>가 marking 결과를 마무리하고, Cleanup이 비어 있는 Region을 회수하며 Mixed GC에서 사용할 Old 후보 정보를 준비합니다.",
+                logs: [
+                    "✓ Remark pause에서 marking 결과 확정.",
+                    "✓ reference processing과 class unloading 처리.",
+                    "✓ Cleanup으로 빈 Region 회수 및 후보 계산."
+                ],
+                targetBlock: "block_remark_cleanup",
+                pulseFrom: [705, 805],
+                pulseTo: [890, 805]
+            },
+            {
+                step: 6,
+                title: "6단계: Mixed GC로 Old 공간 회수",
+                desc: "Young Region과 선택된 Old Region을 함께 evacuation합니다. 여러 번의 Mixed collection으로 효율이 높은 Old Region부터 점진적으로 회수한 뒤 Young-Only Phase로 돌아갑니다.",
+                logs: [
+                    "✓ pause 예산에 맞춰 Old 후보를 Collection Set에 추가.",
+                    "✓ Young + selected Old live object evacuation.",
+                    "✓ 회수 효율이 낮아지면 Space-Reclamation Phase 종료."
+                ],
+                targetBlock: "block_mixed_gc",
+                pulseFrom: [1040, 805],
+                pulseTo: [1225, 805]
+            }
+        ];
+
+        window.EXPLORER_PAGE = {
+            components: COMPONENT_DATA,
+            simulationSteps: SIMULATION_STEPS,
+            initialComponent: 'block_heap_regions',
+            resetSimulationVisuals() {
+                document.getElementById('sim_eden_obj').setAttribute('opacity', '0');
+                document.getElementById('sim_old_obj').setAttribute('opacity', '0');
+                document.getElementById('sim_pc_highlight').setAttribute('opacity', '0');
+            },
+            updateSimulationVisuals(stepNumber) {
+                this.resetSimulationVisuals();
+                if (stepNumber >= 2) document.getElementById('sim_pc_highlight').setAttribute('opacity', '0.9');
+                if (stepNumber <= 2) document.getElementById('sim_eden_obj').setAttribute('opacity', '1');
+                if (stepNumber >= 3) document.getElementById('sim_old_obj').setAttribute('opacity', '1');
+                if (stepNumber >= 6) {
+                    window.setTimeout(() => {
+                        document.getElementById('sim_old_obj').setAttribute('opacity', '0');
+                    }, 800);
+                }
+            }
+        };
+    </script>
+    <script src="../assets/js/explorer.js"></script>
+</body>
+</html>
